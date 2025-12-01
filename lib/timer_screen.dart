@@ -1,9 +1,14 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:audioplayers/audioplayers.dart';
+
 import 'widgets/bauhaus_button.dart';
 import 'task_model.dart';
 
 enum SessionKind { work, shortBreak, longBreak }
 enum CatState { idle, working, resting }
+enum TimerStatus { idle, running, paused }
 
 class TimerScreen extends StatefulWidget {
   final ThemeMode themeMode;
@@ -24,9 +29,16 @@ class _TimerScreenState extends State<TimerScreen> {
   SessionKind _sessionKind = SessionKind.work;
   int _workMinutes = 25;
   int _breakMinutes = 5;
-  bool _isRunning = false;
+
   Duration _remaining = const Duration(minutes: 25);
   CatState _catState = CatState.idle;
+  TimerStatus _timerStatus = TimerStatus.idle;
+  Timer? _timer;
+
+  // ===== AUDIO PLAYERS =====
+  final AudioPlayer _alertPlayer = AudioPlayer();      // 16 / 8 / 3 min marks
+  final AudioPlayer _countdownPlayer = AudioPlayer();  // single beep at 5 sec to make illusion of starting at 3. . .its weird, someone edit this pls
+  final AudioPlayer _endPlayer = AudioPlayer();        // session finished
 
   // ===== TASKS =====
   final TextEditingController _taskController = TextEditingController();
@@ -36,6 +48,16 @@ class _TimerScreenState extends State<TimerScreen> {
   void initState() {
     super.initState();
     _remaining = Duration(minutes: _workMinutes);
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _taskController.dispose();
+    _alertPlayer.dispose();
+    _countdownPlayer.dispose();
+    _endPlayer.dispose();
+    super.dispose();
   }
 
   // ---------- TIME FORMAT ----------
@@ -57,11 +79,27 @@ class _TimerScreenState extends State<TimerScreen> {
     }
   }
 
-  void _setSession(SessionKind kind) {
-    if (_isRunning) return;
+  // ---------- AUDIO HELPERS ----------
+  Future<void> _playAlert() async {
+    await _alertPlayer.play(AssetSource('sounds/meow.mp3'));
+  }
 
+  Future<void> _playCountdown() async {
+    await _countdownPlayer.play(AssetSource('sounds/countdown.mp3'));
+  }
+
+  Future<void> _playSessionEnd() async {
+    await _endPlayer.play(AssetSource('sounds/meowmine.mp3'));
+  }
+
+  // ---------- SESSION / DURATION ----------
+  void _setSession(SessionKind kind) {
+    if (_timerStatus == TimerStatus.running) return;
+
+    _timer?.cancel();
     setState(() {
       _sessionKind = kind;
+      _timerStatus = TimerStatus.idle;
 
       if (kind == SessionKind.work) {
         _remaining = Duration(minutes: _workMinutes);
@@ -74,7 +112,7 @@ class _TimerScreenState extends State<TimerScreen> {
   }
 
   void _selectWork(int m) {
-    if (_isRunning) return;
+    if (_timerStatus == TimerStatus.running) return;
     setState(() {
       _workMinutes = m;
       if (_sessionKind == SessionKind.work) {
@@ -84,7 +122,7 @@ class _TimerScreenState extends State<TimerScreen> {
   }
 
   void _selectBreak(int m) {
-    if (_isRunning) return;
+    if (_timerStatus == TimerStatus.running) return;
     setState(() {
       _breakMinutes = m;
       if (_sessionKind != SessionKind.work) {
@@ -93,32 +131,99 @@ class _TimerScreenState extends State<TimerScreen> {
     });
   }
 
-  // ---------- CONTROLS ----------
+  // ---------- TIMER CONTROLS ----------
   void _start() {
-    setState(() {
-      _isRunning = true;
-      _catState =
-          _sessionKind == SessionKind.work ? CatState.working : CatState.resting;
-    });
+  if (_timerStatus == TimerStatus.running) return;
+
+  // If we’re at 0 from a previous run, reset to full duration first
+  if (_remaining.inSeconds == 0) {
+    _remaining = Duration(
+      minutes: _sessionKind == SessionKind.work ? _workMinutes : _breakMinutes,
+    );
   }
 
-  void _pause() {
+  _timer?.cancel();
+  _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+    if (!mounted) return;
+
     setState(() {
-      _isRunning = false;
-      _catState =
-          _sessionKind == SessionKind.work ? CatState.idle : CatState.resting;
+      final currentSecs = _remaining.inSeconds;
+      final next = currentSecs - 1;
+
+      if (next < 0) {
+        return; // safety guard
+      }
+
+      if (next == 0) {
+        // We are finishing the current session on this tick
+        _remaining = Duration.zero;
+        _playSessionEnd();
+
+        if (_sessionKind == SessionKind.work) {
+          // WORK → automatically start BREAK
+          _sessionKind = _breakMinutes == 5
+              ? SessionKind.shortBreak
+              : SessionKind.longBreak;
+          _catState = CatState.resting;
+          _remaining = Duration(minutes: _breakMinutes);
+        } else {
+          // BREAK → automatically start WORK
+          _sessionKind = SessionKind.work;
+          _catState = CatState.working;
+          _remaining = Duration(minutes: _workMinutes);
+        }
+
+        // Notice: we DO NOT cancel the timer here.
+        // It keeps running into the next session automatically.
+      } else {
+        // Normal countdown tick
+        _remaining = Duration(seconds: next);
+        final secs = _remaining.inSeconds;
+
+        // Alerts at 16, 8, 3 minutes remaining (for both work & break)
+        if (secs == 16 * 60 || secs == 8 * 60 || secs == 3 * 60) {
+          _playAlert();
+        }
+
+        // Countdown sound ONLY for breaks, at last 3 seconds (single beep at 3s)
+        if (_sessionKind != SessionKind.work && secs == 5) {
+          _playCountdown();
+        }
+      }
+    });
+  });
+
+  setState(() {
+    _timerStatus = TimerStatus.running;
+    _catState = _sessionKind == SessionKind.work
+        ? CatState.working
+        : CatState.resting;
+  });
+}
+
+
+  void _pause() {
+    if (_timerStatus != TimerStatus.running) return;
+
+    _timer?.cancel();
+    setState(() {
+      _timerStatus = TimerStatus.paused;
+      _catState = _sessionKind == SessionKind.work
+          ? CatState.idle
+          : CatState.resting;
     });
   }
 
   void _reset() {
+    _timer?.cancel();
     setState(() {
-      _isRunning = false;
-      _catState = _sessionKind == SessionKind.work
-          ? CatState.idle
-          : CatState.resting;
+      _timerStatus = TimerStatus.idle;
       _remaining = Duration(
         minutes: _sessionKind == SessionKind.work ? _workMinutes : _breakMinutes,
       );
+      _catState = _sessionKind == SessionKind.work
+          ? CatState.idle
+          : CatState.resting;
     });
   }
 
@@ -139,7 +244,101 @@ class _TimerScreenState extends State<TimerScreen> {
     });
   }
 
-  // ---------- BUILD ----------
+  // ---------- SETTINGS BOTTOM SHEET ----------
+  void _openSettings() {
+    showModalBottomSheet(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) {
+        return Padding(
+          padding: const EdgeInsets.all(16),
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  "Settings",
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+                const SizedBox(height: 16),
+
+                const Text(
+                  "Work duration",
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  children: [25, 30, 40].map((m) {
+                    final selected =
+                        _sessionKind == SessionKind.work && _workMinutes == m;
+                    return ChoiceChip(
+                      label: Text('$m min work'),
+                      selected: selected,
+                      onSelected: (_) {
+                        _setSession(SessionKind.work);
+                        _selectWork(m);
+                      },
+                    );
+                  }).toList(),
+                ),
+
+                const SizedBox(height: 16),
+                const Text(
+                  "Break duration",
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  children: [5, 10].map((m) {
+                    final selected = _sessionKind != SessionKind.work &&
+                        _breakMinutes == m;
+                    return ChoiceChip(
+                      label: Text('$m min break'),
+                      selected: selected,
+                      onSelected: (_) {
+                        _setSession(
+                            m == 5 ? SessionKind.shortBreak : SessionKind.longBreak);
+                        _selectBreak(m);
+                      },
+                    );
+                  }).toList(),
+                ),
+
+                const SizedBox(height: 24),
+                const Text(
+                  "Test sounds",
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    ElevatedButton(
+                      onPressed: _playAlert,
+                      child: const Text("Test alert (meow)"),
+                    ),
+                    ElevatedButton(
+                      onPressed: _playCountdown,
+                      child: const Text("Test countdown"),
+                    ),
+                    ElevatedButton(
+                      onPressed: _playSessionEnd,
+                      child: const Text("Test end"),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // ===================== BUILD =====================
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -153,208 +352,203 @@ class _TimerScreenState extends State<TimerScreen> {
               width: 28,
               height: 28,
             ),
-            onPressed: () {},
+            onPressed: _openSettings,
           ),
         ],
       ),
 
-      // ===================== BODY =====================
-      body: Padding(
+      // Make the whole page scrollable to prevent overflow
+      body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // ===== TOP TIMER AREA =====
-            Expanded(
-              flex: 3,
-              child: Column(
-                children: [
-                  Row(
-                    children: [
-                      Image.asset(catImage, width: 70),
-                      const SizedBox(width: 12),
+            Column(
+              children: [
+                Row(
+                  children: [
+                    Image.asset(catImage, width: 70),
+                    const SizedBox(width: 12),
 
-                      // TIMER PILL
-                      Expanded(
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 24, vertical: 16),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(50),
-                            border: Border.all(color: Colors.black, width: 3),
-                          ),
-                          child: Column(
-                            children: [
-                              const Text(
-                                "TIMER",
-                                style: TextStyle(
-                                    letterSpacing: 4,
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.black87,
-                                    ),
-                                    
+                    // TIMER PILL
+                    Expanded(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 24, vertical: 16),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(50),
+                          border: Border.all(color: Colors.black, width: 3),
+                        ),
+                        child: Column(
+                          children: [
+                            const Text(
+                              "TIMER",
+                              style: TextStyle(
+                                letterSpacing: 4,
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.black87,
                               ),
-                              const SizedBox(height: 4),
-                              Text(
-                                _formattedTime,
-                                style: const TextStyle(
-                                  fontSize: 36,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.black87,
-                                ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              _formattedTime,
+                              style: const TextStyle(
+                                fontSize: 36,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.black87,
                               ),
-                            ],
-                          ),
+                            ),
+                          ],
                         ),
                       ),
+                    ),
 
-                      const SizedBox(width: 12),
-                      Image.asset(catImage, width: 70),
-                    ],
-                  ),
+                    const SizedBox(width: 12),
+                    Image.asset(catImage, width: 70),
+                  ],
+                ),
 
-                  const SizedBox(height: 24),
+                const SizedBox(height: 24),
 
-                  // CIRCLE BUTTONS
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      BauhausCircleButton(
-                        icon: Icons.refresh,
-                        label: "Reset",
-                        onPressed: _reset,
-                        color: Colors.redAccent,
-                      ),
-                      const SizedBox(width: 16),
-                      BauhausCircleButton(
-                        icon: Icons.play_arrow,
-                        label: "Start",
-                        onPressed: _isRunning ? null : _start,
-                        color: Colors.green.shade700,
-                      ),
-                      const SizedBox(width: 16),
-                      BauhausCircleButton(
-                        icon: Icons.pause,
-                        label: "Pause",
-                        onPressed: _isRunning ? _pause : null,
-                        color: Colors.orange.shade700,
-                      ),
-                    ],
-                  ),
-                ],
-              ),
+                // CIRCLE BUTTONS
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    BauhausCircleButton(
+                      icon: Icons.refresh,
+                      label: "Reset",
+                      onPressed: _reset,
+                      color: Colors.redAccent,
+                    ),
+                    const SizedBox(width: 16),
+                    BauhausCircleButton(
+                      icon: Icons.play_arrow,
+                      label: "Start",
+                      onPressed:
+                          _timerStatus == TimerStatus.running ? null : _start,
+                      color: Colors.green.shade700,
+                    ),
+                    const SizedBox(width: 16),
+                    BauhausCircleButton(
+                      icon: Icons.pause,
+                      label: "Pause",
+                      onPressed:
+                          _timerStatus == TimerStatus.running ? _pause : null,
+                      color: Colors.orange.shade700,
+                    ),
+                  ],
+                ),
+              ],
             ),
 
+            const SizedBox(height: 16),
             const Divider(thickness: 2),
+            const SizedBox(height: 8),
 
             // ===== TASK AREA =====
-            Expanded(
-              flex: 4,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    "Tasks",
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 20,
-                      letterSpacing: 2,
-                      
+            const Text(
+              "Tasks",
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 20,
+                letterSpacing: 2,
+              ),
+            ),
+            const SizedBox(height: 12),
+
+            // ADD TASK ROW
+            Row(
+              children: [
+                InkWell(
+                  onTap: _addTask,
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: const BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Colors.black,
+                    ),
+                    child: const Icon(Icons.add, color: Colors.white),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      border: Border.all(color: Colors.black, width: 2),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: TextField(
+                      controller: _taskController,
+                      style: const TextStyle(color: Colors.black87),
+                      decoration: const InputDecoration(
+                        hintText: "Type task here",
+                        hintStyle: TextStyle(color: Colors.black54),
+                        border: InputBorder.none,
+                      ),
+                      onSubmitted: (_) => _addTask(),
                     ),
                   ),
-                  const SizedBox(height: 12),
+                ),
+              ],
+            ),
 
-                  // ADD TASK ROW
-                  Row(
+            const SizedBox(height: 12),
+
+            // TASK LIST
+            ListView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: _tasks.length,
+              itemBuilder: (context, index) {
+                final task = _tasks[index];
+
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(
                     children: [
-                      InkWell(
-                        onTap: _addTask,
-                        child: Container(
-                          width: 40,
-                          height: 40,
-                          decoration: const BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: Colors.black,
-                          ),
-                          child: const Icon(Icons.add, color: Colors.white),
-                        ),
+                      Checkbox(
+                        value: task.completed,
+                        onChanged: (v) {
+                          setState(() => task.completed = v ?? false);
+                        },
                       ),
-                      const SizedBox(width: 12),
                       Expanded(
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
                           decoration: BoxDecoration(
                             color: Colors.white,
-                            border: Border.all(color: Colors.black, width: 2),
-                            borderRadius: BorderRadius.circular(8),
+                            border:
+                                Border.all(color: Colors.black, width: 2),
+                            borderRadius: BorderRadius.circular(4),
                           ),
-                          child: TextField(
-                            controller: _taskController,
-                            decoration: const InputDecoration(
-                              hintText: "Type task here",
-                              border: InputBorder.none,
+                          child: Text(
+                            task.title,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: Colors.black87,
+                              decoration: task.completed
+                                  ? TextDecoration.lineThrough
+                                  : TextDecoration.none,
                             ),
-                            onSubmitted: (_) => _addTask(),
                           ),
                         ),
+                      ),
+                      IconButton(
+                        icon: const Icon(
+                          Icons.remove_circle_outline_outlined,
+                        ),
+                        onPressed: () => _removeTask(index),
                       ),
                     ],
                   ),
-
-                  const SizedBox(height: 12),
-
-                  // TASK LIST
-                  Expanded(
-                    child: ListView.builder(
-                      itemCount: _tasks.length,
-                      itemBuilder: (context, index) {
-                        final task = _tasks[index];
-
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 4),
-                          child: Row(
-                            children: [
-                              Checkbox(
-                                value: task.completed,
-                                onChanged: (v) {
-                                  setState(() => task.completed = v ?? false);
-                                },
-                              ),
-                              Expanded(
-                                child: Container(
-                                  padding:
-                                      const EdgeInsets.symmetric(horizontal: 8),
-                                  decoration: BoxDecoration(
-                                    color: Colors.white,
-                                    border: Border.all(
-                                        color: Colors.black, width: 2),
-                                    borderRadius: BorderRadius.circular(4),
-                                  ),
-                                  child: Text(
-                                    task.title,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      decoration: task.completed
-                                          ? TextDecoration.lineThrough
-                                          : TextDecoration.none,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              IconButton(
-                                icon: const Icon(
-                                    Icons.remove_circle_outline_outlined),
-                                onPressed: () => _removeTask(index),
-                              ),
-                            ],
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                ],
-              ),
+                );
+              },
             ),
           ],
         ),
