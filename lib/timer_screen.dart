@@ -521,8 +521,12 @@ class _TimerScreenState extends State<TimerScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // ===== TOP TIMER AREA =====
-                      Column(
+                // ===== TOP TIMER AREA =====
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Column(
                         children: [
                           Row(
                             children: [
@@ -565,44 +569,17 @@ class _TimerScreenState extends State<TimerScreen> {
                               ),
 
                               const SizedBox(width: 12),
-                              Container(
-                                width: 120,
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.circular(14),
-                                  border: Border.all(color: Colors.black87, width: 2),
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      _breakLabel,
-                                      style: const TextStyle(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w700,
-                                        letterSpacing: 0.5,
-                                        color: Colors.black87,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      _breakTimerText,
-                                      style: const TextStyle(
-                                        fontSize: 20,
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.black87,
-                                      ),
-                                    ),
-                                  ],
-                                ),
+                              Transform(
+                                alignment: Alignment.center,
+                                transform: Matrix4.identity()..scale(-1.0, 1.0, 1.0),
+                                child: Image.asset(catImage, width: 70),
                               ),
                             ],
                           ),
 
                           const SizedBox(height: 24),
 
-                          // CIRCLE BUTTONS
+                          // CIRCLE BUTTONS under the timer only
                           Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
@@ -627,6 +604,42 @@ class _TimerScreenState extends State<TimerScreen> {
                           ),
                         ],
                       ),
+                    ),
+                    const SizedBox(width: 12),
+                    Container(
+                      width: 120,
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: Colors.black87, width: 2),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _breakLabel,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.5,
+                              color: Colors.black87,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            _breakTimerText,
+                            style: const TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.black87,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
 
                       const SizedBox(height: 16),
                       const Divider(thickness: 2),
@@ -685,72 +698,109 @@ class _TimerScreenState extends State<TimerScreen> {
                       const SizedBox(height: 12),
 
                       // TASK LIST
-                      Builder(
-                        builder: (context) {
-                          final orderedTasks = [
-                            ..._tasks.where((t) => !t.completed),
-                            ..._tasks.where((t) => t.completed),
-                          ];
+                      Builder(builder: (context) {
+                        final unfinished = _tasks.where((t) => !t.completed).toList();
+                        final finished = _tasks.where((t) => t.completed).toList();
 
-                          return ListView.builder(
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            itemCount: orderedTasks.length,
-                            itemBuilder: (context, index) {
-                              final task = orderedTasks[index];
-                              final sourceIndex = _tasks.indexOf(task);
-
-                              return Padding(
-                                padding: const EdgeInsets.symmetric(vertical: 4),
-                                child: Row(
-                                  children: [
-                                    Checkbox(
-                                      value: task.completed,
-                                      onChanged: (v) {
-                                        setState(() {
-                                          task.completed = v ?? false;
-                                        });
-                                      },
-                                    ),
-                                    Expanded(
-                                      child: Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                                        decoration: BoxDecoration(
-                                          color: task.completed
-                                              ? const Color(0xFFE6E4E4) // darker for completed items
-                                              : Colors.white,
-                                          border:
-                                              Border.all(color: Colors.black, width: 2),
-                                          borderRadius: BorderRadius.circular(4),
-                                        ),
-                                        child: Text(
-                                          task.title,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: TextStyle(
-                                            color: Colors.black87,
-                                            decoration: task.completed
-                                                ? TextDecoration.lineThrough
-                                                : TextDecoration.none,
-                                            decorationColor: Colors.black87,
-                                            decorationStyle: TextDecorationStyle.solid,
-                                            decorationThickness: 2,
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                    IconButton(
-                                      icon: const Icon(
-                                        Icons.remove_circle_outline_outlined,
-                                      ),
-                                      onPressed: () => _removeTask(sourceIndex),
-                                    ),
-                                  ],
+                        Widget buildTaskRow(Task task) {
+                          final sourceIndex = _tasks.indexOf(task);
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 4),
+                            child: Row(
+                              children: [
+                                Checkbox(
+                                  value: task.completed,
+                                  onChanged: (v) {
+                                    setState(() {
+                                      task.completed = v ?? false;
+                                    });
+                                  },
                                 ),
-                              );
-                            },
+                                Expanded(
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                                    decoration: BoxDecoration(
+                                      color: task.completed
+                                          ? const Color(0xFFE6E4E4) // darker for completed items
+                                          : Colors.white,
+                                      border:
+                                          Border.all(color: Colors.black, width: 2),
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Text(
+                                      task.title,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        color: Colors.black87,
+                                        decoration: task.completed
+                                            ? TextDecoration.lineThrough
+                                            : TextDecoration.none,
+                                        decorationColor: Colors.black87,
+                                        decorationStyle: TextDecorationStyle.solid,
+                                        decorationThickness: 2,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                IconButton(
+                                  icon: const Icon(
+                                    Icons.remove_circle_outline_outlined,
+                                  ),
+                                  onPressed: () => _removeTask(sourceIndex),
+                                ),
+                              ],
+                            ),
                           );
-                        },
-                      ),
+                        }
+
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (unfinished.isNotEmpty) ...[
+                              const Text(
+                                "To do",
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: 1,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              ListView.builder(
+                                shrinkWrap: true,
+                                physics: const NeverScrollableScrollPhysics(),
+                                itemCount: unfinished.length,
+                                itemBuilder: (context, index) =>
+                                    buildTaskRow(unfinished[index]),
+                              ),
+                              const SizedBox(height: 12),
+                            ],
+                            const Text(
+                              "Done",
+                              style: TextStyle(
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 1,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            if (finished.isEmpty)
+                              const Padding(
+                                padding: EdgeInsets.only(bottom: 8),
+                                child: Text(
+                                  "Nothing completed yet.",
+                                  style: TextStyle(color: Colors.black54),
+                                ),
+                              )
+                            else
+                              ListView.builder(
+                                shrinkWrap: true,
+                                physics: const NeverScrollableScrollPhysics(),
+                                itemCount: finished.length,
+                                itemBuilder: (context, index) =>
+                                    buildTaskRow(finished[index]),
+                              ),
+                          ],
+                        );
+                      }),
                     ],
                   ),
                 ),
