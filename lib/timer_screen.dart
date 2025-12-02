@@ -31,19 +31,9 @@ const List<_BackgroundOption> _backgroundOptions = [
     asset: 'assets/images/pusheen.jpg',
   ),
   _BackgroundOption(
-    key: 'warm',
-    label: 'Warm beige',
-    color: Color(0xFFF5F2E9),
-  ),
-  _BackgroundOption(
-    key: 'mint',
-    label: 'Mint mist',
-    color: Color(0xFFE6F6F2),
-  ),
-  _BackgroundOption(
-    key: 'sunset',
-    label: 'Sunset blush',
-    color: Color(0xFFFFE6EA),
+    key: 'darkPusheen',
+    label: 'Dark Pusheen',
+    asset: 'assets/images/darkPusheen.jpg',
   ),
 ];
 
@@ -72,6 +62,7 @@ class _TimerScreenState extends State<TimerScreen> {
   TimerStatus _timerStatus = TimerStatus.idle;
   Timer? _timer;
   String _backgroundKey = 'pusheen';
+  bool _muted = false;
 
   // ===== AUDIO PLAYERS =====
   final AudioPlayer _alertPlayer = AudioPlayer();      // 16 / 8 / 3 min marks
@@ -126,9 +117,14 @@ class _TimerScreenState extends State<TimerScreen> {
   }
 
   Color? get _contentOverlayColor {
-    return _selectedBackground.asset != null
-        ? Colors.white.withOpacity(0.82)
-        : null;
+    switch (_selectedBackground.key) {
+      case 'pusheen':
+        return Colors.black.withOpacity(0.10);
+      case 'darkPusheen':
+        return Colors.white.withOpacity(0.10);
+      default:
+        return null;
+    }
   }
 
   // ---------- TIME FORMAT ----------
@@ -145,13 +141,14 @@ class _TimerScreenState extends State<TimerScreen> {
   }
 
   String get _breakTimerText {
-    final duration =
-        _sessionKind == SessionKind.work ? Duration(minutes: _breakMinutes) : _remaining;
+    final duration = _sessionKind == SessionKind.work
+        ? Duration(minutes: _breakMinutes) // upcoming break
+        : Duration(minutes: _workMinutes); // upcoming work
     return _formatDuration(duration);
   }
 
   String get _breakLabel {
-    return _sessionKind == SessionKind.work ? "Upcoming break" : "Break";
+    return _sessionKind == SessionKind.work ? "Upcoming break" : "Upcoming work";
   }
 
   // ---------- UI HELPERS ----------
@@ -168,14 +165,17 @@ class _TimerScreenState extends State<TimerScreen> {
 
   // ---------- AUDIO HELPERS ----------
   Future<void> _playAlert() async {
+    if (_muted) return;
     await _alertPlayer.play(AssetSource('sounds/meow.mp3'));
   }
 
   Future<void> _playCountdown() async {
+    if (_muted) return;
     await _countdownPlayer.play(AssetSource('sounds/countdown.mp3'));
   }
 
   Future<void> _playSessionEnd() async {
+    if (_muted) return;
     await _endPlayer.play(AssetSource('sounds/meowmine.mp3'));
   }
 
@@ -272,8 +272,8 @@ class _TimerScreenState extends State<TimerScreen> {
           _playAlert();
         }
 
-        // Countdown sound ONLY for breaks, at last 3 seconds (single beep at 3s)
-        if (_sessionKind != SessionKind.work && secs == 5) {
+        // Countdown sound for last few seconds of any session (single beep at 5s)
+        if (secs == 5) {
           _playCountdown();
         }
       }
@@ -314,6 +314,20 @@ class _TimerScreenState extends State<TimerScreen> {
     });
   }
 
+  void _skipToFiveSecondsBeforeAudioCue() {
+    _timer?.cancel();
+    setState(() {
+      // Start 6s out so the next tick hits 5s, triggering any countdown sound,
+      // and finishes at 0 for the end-of-session audio.
+      _remaining = const Duration(seconds: 6);
+      _timerStatus = TimerStatus.idle;
+      _catState = _sessionKind == SessionKind.work
+          ? CatState.working
+          : CatState.resting;
+    });
+    _start();
+  }
+
   // ---------- TASK LOGIC ----------
   void _addTask() {
     final text = _taskController.text.trim();
@@ -337,137 +351,138 @@ class _TimerScreenState extends State<TimerScreen> {
       context: context,
       showDragHandle: true,
       builder: (ctx) {
-        return Padding(
-          padding: const EdgeInsets.all(16),
-          child: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  "Settings",
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-                const SizedBox(height: 16),
+        return StatefulBuilder(
+          builder: (context, modalSetState) {
+            void syncState(VoidCallback fn) {
+              setState(fn);
+              modalSetState(() {});
+            }
 
-                const Text(
-                  "Work duration",
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  children: [25, 30, 40].map((m) {
-                    final selected =
-                        _sessionKind == SessionKind.work && _workMinutes == m;
-                    return ChoiceChip(
-                      label: Text('$m min work'),
-                      selected: selected,
-                      onSelected: (_) {
-                        _setSession(SessionKind.work);
-                        _selectWork(m);
-                      },
-                    );
-                  }).toList(),
-                ),
-
-                const SizedBox(height: 16),
-                const Text(
-                  "Break duration",
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  children: [5, 10].map((m) {
-                    final selected = _sessionKind != SessionKind.work &&
-                        _breakMinutes == m;
-                    return ChoiceChip(
-                      label: Text('$m min break'),
-                      selected: selected,
-                      onSelected: (_) {
-                        // Update break length without forcing the current session
-                        // into a break when the user is working.
-                        _selectBreak(m);
-                        if (_sessionKind != SessionKind.work) {
-                          setState(() {
-                            _sessionKind = m == 5
-                                ? SessionKind.shortBreak
-                                : SessionKind.longBreak;
-                          });
-                        }
-                      },
-                    );
-                  }).toList(),
-                ),
-
-                const SizedBox(height: 16),
-                const Text(
-                  "Theme background",
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 8),
-                DropdownButton<String>(
-                  value: _backgroundKey,
-                  isExpanded: true,
-                  items: _backgroundOptions.map((option) {
-                    return DropdownMenuItem(
-                      value: option.key,
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 26,
-                            height: 26,
-                            decoration: BoxDecoration(
-                              color: option.color,
-                              borderRadius: BorderRadius.circular(6),
-                              image: option.asset != null
-                                  ? DecorationImage(
-                                      image: AssetImage(option.asset!),
-                                      fit: BoxFit.cover,
-                                    )
-                                  : null,
-                              border: Border.all(color: Colors.black12),
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Text(option.label),
-                        ],
-                      ),
-                    );
-                  }).toList(),
-                  onChanged: (value) {
-                    if (value == null) return;
-                    setState(() => _backgroundKey = value);
-                  },
-                ),
-
-                const SizedBox(height: 24),
-                const Text(
-                  "Test sounds",
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
+            return Padding(
+              padding: const EdgeInsets.all(16),
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    ElevatedButton(
-                      onPressed: _playAlert,
-                      child: const Text("Test alert (meow)"),
+                    Text(
+                      "Settings",
+                      style: Theme.of(context).textTheme.titleLarge,
                     ),
-                    ElevatedButton(
-                      onPressed: _playCountdown,
-                      child: const Text("Test countdown"),
+                    const SizedBox(height: 16),
+
+                    const Text(
+                      "Work duration",
+                      style: TextStyle(fontWeight: FontWeight.bold),
                     ),
-                    ElevatedButton(
-                      onPressed: _playSessionEnd,
-                      child: const Text("Test end"),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      children: [25, 30, 40].map((m) {
+                        final selected =
+                            _sessionKind == SessionKind.work && _workMinutes == m;
+                        return ChoiceChip(
+                          label: Text('$m min work'),
+                          selected: selected,
+                          onSelected: (_) {
+                            syncState(() {
+                              _setSession(SessionKind.work);
+                              _selectWork(m);
+                            });
+                          },
+                        );
+                      }).toList(),
+                    ),
+
+                    const SizedBox(height: 16),
+                    const Text(
+                      "Break duration",
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      children: [5, 10].map((m) {
+                        final selected =
+                            _sessionKind != SessionKind.work && _breakMinutes == m;
+                        return ChoiceChip(
+                          label: Text('$m min break'),
+                          selected: selected,
+                          onSelected: (_) {
+                            syncState(() {
+                              // Update break length without forcing the current session
+                              // into a break when the user is working.
+                              _selectBreak(m);
+                              if (_sessionKind != SessionKind.work) {
+                                _sessionKind = m == 5
+                                    ? SessionKind.shortBreak
+                                    : SessionKind.longBreak;
+                              }
+                            });
+                          },
+                        );
+                      }).toList(),
+                    ),
+
+                    const SizedBox(height: 16),
+                    const Text(
+                      "Theme background",
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    DropdownButton<String>(
+                      value: _backgroundKey,
+                      isExpanded: true,
+                      items: _backgroundOptions.map((option) {
+                        return DropdownMenuItem(
+                          value: option.key,
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 26,
+                                height: 26,
+                                decoration: BoxDecoration(
+                                  color: option.color,
+                                  borderRadius: BorderRadius.circular(6),
+                                  image: option.asset != null
+                                      ? DecorationImage(
+                                          image: AssetImage(option.asset!),
+                                          fit: BoxFit.cover,
+                                        )
+                                      : null,
+                                  border: Border.all(color: Colors.black12),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Text(option.label),
+                            ],
+                          ),
+                        );
+                      }).toList(),
+                      onChanged: (value) {
+                        if (value == null) return;
+                        syncState(() => _backgroundKey = value);
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          "Mute sounds",
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        Switch(
+                          value: _muted,
+                          onChanged: (v) => syncState(() => _muted = v),
+                        ),
+                      ],
                     ),
                   ],
                 ),
-              ],
-            ),
-          ),
+              ),
+            );
+          },
         );
       },
     );
@@ -569,6 +584,40 @@ class _TimerScreenState extends State<TimerScreen> {
                               ),
 
                               const SizedBox(width: 12),
+                              Container(
+                                width: 120,
+                                padding:
+                                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(color: Colors.black87, width: 2),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      _breakLabel,
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w700,
+                                        letterSpacing: 0.5,
+                                        color: Colors.black87,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      _breakTimerText,
+                                      style: const TextStyle(
+                                        fontSize: 20,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.black87,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 12),
                               Transform(
                                 alignment: Alignment.center,
                                 transform: Matrix4.identity()..scale(-1.0, 1.0, 1.0),
@@ -602,37 +651,65 @@ class _TimerScreenState extends State<TimerScreen> {
                               ),
                             ],
                           ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Container(
-                      width: 120,
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: Colors.black87, width: 2),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            _breakLabel,
-                            style: const TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: 0.5,
-                              color: Colors.black87,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            _breakTimerText,
-                            style: const TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.black87,
+                          const SizedBox(height: 8),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: PopupMenuButton<String>(
+                              tooltip: "Developer tools",
+                              position: PopupMenuPosition.under,
+                              onSelected: (value) {
+                                switch (value) {
+                                  case 'skip5':
+                                    _skipToFiveSecondsBeforeAudioCue();
+                                    break;
+                                  case 'alert':
+                                    _playAlert();
+                                    break;
+                                  case 'countdown':
+                                    _playCountdown();
+                                    break;
+                                  case 'end':
+                                    _playSessionEnd();
+                                    break;
+                                }
+                              },
+                              itemBuilder: (context) => const [
+                                PopupMenuItem(
+                                  value: 'skip5',
+                                  child: Text("Skip to 5s before audio"),
+                                ),
+                                PopupMenuItem(
+                                  value: 'alert',
+                                  child: Text("Test alert (meow)"),
+                                ),
+                                PopupMenuItem(
+                                  value: 'countdown',
+                                  child: Text("Test countdown"),
+                                ),
+                                PopupMenuItem(
+                                  value: 'end',
+                                  child: Text("Test end"),
+                                ),
+                              ],
+                              child: Container(
+                                padding:
+                                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                decoration: BoxDecoration(
+                                  color: Colors.black,
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: const Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.bug_report, color: Colors.white, size: 16),
+                                    SizedBox(width: 6),
+                                    Text(
+                                      "Dev",
+                                      style: TextStyle(color: Colors.white),
+                                    ),
+                                  ],
+                                ),
+                              ),
                             ),
                           ),
                         ],
