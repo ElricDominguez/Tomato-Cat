@@ -43,3 +43,11 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+# Platform-specific Flutter generated files (safe to ignore across OS builds)
+android/.gradle/
+android/local.properties
+ios/Flutter/ephemeral/
+ios/.symlinks/
+macos/Flutter/ephemeral/
+linux/flutter/ephemeral/
+windows/flutter/ephemeral/

@@ -10,6 +10,43 @@ enum SessionKind { work, shortBreak, longBreak }
 enum CatState { idle, working, resting }
 enum TimerStatus { idle, running, paused }
 
+class _BackgroundOption {
+  final String key;
+  final String label;
+  final Color? color;
+  final String? asset;
+
+  const _BackgroundOption({
+    required this.key,
+    required this.label,
+    this.color,
+    this.asset,
+  });
+}
+
+const List<_BackgroundOption> _backgroundOptions = [
+  _BackgroundOption(
+    key: 'pusheen',
+    label: 'Pusheen',
+    asset: 'assets/images/pusheen.jpg',
+  ),
+  _BackgroundOption(
+    key: 'warm',
+    label: 'Warm beige',
+    color: Color(0xFFF5F2E9),
+  ),
+  _BackgroundOption(
+    key: 'mint',
+    label: 'Mint mist',
+    color: Color(0xFFE6F6F2),
+  ),
+  _BackgroundOption(
+    key: 'sunset',
+    label: 'Sunset blush',
+    color: Color(0xFFFFE6EA),
+  ),
+];
+
 class TimerScreen extends StatefulWidget {
   final ThemeMode themeMode;
   final ValueChanged<ThemeMode> onThemeChanged;
@@ -34,6 +71,7 @@ class _TimerScreenState extends State<TimerScreen> {
   CatState _catState = CatState.idle;
   TimerStatus _timerStatus = TimerStatus.idle;
   Timer? _timer;
+  String _backgroundKey = 'pusheen';
 
   // ===== AUDIO PLAYERS =====
   final AudioPlayer _alertPlayer = AudioPlayer();      // 16 / 8 / 3 min marks
@@ -60,11 +98,60 @@ class _TimerScreenState extends State<TimerScreen> {
     super.dispose();
   }
 
+  _BackgroundOption get _selectedBackground {
+    return _backgroundOptions.firstWhere(
+      (option) => option.key == _backgroundKey,
+      orElse: () => _backgroundOptions.first,
+    );
+  }
+
+  BoxDecoration _backgroundDecoration() {
+    final option = _selectedBackground;
+    if (option.asset != null) {
+      return BoxDecoration(
+        image: DecorationImage(
+          image: AssetImage(option.asset!),
+          fit: BoxFit.cover,
+          colorFilter: ColorFilter.mode(
+            Colors.black.withOpacity(0.05),
+            BlendMode.srcATop,
+          ),
+        ),
+      );
+    }
+
+    return BoxDecoration(
+      color: option.color ?? Theme.of(context).scaffoldBackgroundColor,
+    );
+  }
+
+  Color? get _contentOverlayColor {
+    return _selectedBackground.asset != null
+        ? Colors.white.withOpacity(0.82)
+        : null;
+  }
+
   // ---------- TIME FORMAT ----------
   String get _formattedTime {
     final m = _remaining.inMinutes.remainder(60).toString().padLeft(2, '0');
     final s = _remaining.inSeconds.remainder(60).toString().padLeft(2, '0');
     return "$m:$s";
+  }
+
+  String _formatDuration(Duration duration) {
+    final m = duration.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final s = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return "$m:$s";
+  }
+
+  String get _breakTimerText {
+    final duration =
+        _sessionKind == SessionKind.work ? Duration(minutes: _breakMinutes) : _remaining;
+    return _formatDuration(duration);
+  }
+
+  String get _breakLabel {
+    return _sessionKind == SessionKind.work ? "Upcoming break" : "Break";
   }
 
   // ---------- UI HELPERS ----------
@@ -307,6 +394,47 @@ class _TimerScreenState extends State<TimerScreen> {
                   }).toList(),
                 ),
 
+                const SizedBox(height: 16),
+                const Text(
+                  "Theme background",
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                DropdownButton<String>(
+                  value: _backgroundKey,
+                  isExpanded: true,
+                  items: _backgroundOptions.map((option) {
+                    return DropdownMenuItem(
+                      value: option.key,
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 26,
+                            height: 26,
+                            decoration: BoxDecoration(
+                              color: option.color,
+                              borderRadius: BorderRadius.circular(6),
+                              image: option.asset != null
+                                  ? DecorationImage(
+                                      image: AssetImage(option.asset!),
+                                      fit: BoxFit.cover,
+                                    )
+                                  : null,
+                              border: Border.all(color: Colors.black12),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Text(option.label),
+                        ],
+                      ),
+                    );
+                  }).toList(),
+                  onChanged: (value) {
+                    if (value == null) return;
+                    setState(() => _backgroundKey = value);
+                  },
+                ),
+
                 const SizedBox(height: 24),
                 const Text(
                   "Test sounds",
@@ -346,211 +474,265 @@ class _TimerScreenState extends State<TimerScreen> {
         title: const Text("Tomato Cat Pomodoro"),
         centerTitle: true,
         actions: [
-          IconButton(
-            icon: Image.asset(
-              "assets/images/settings_button.png",
-              width: 28,
-              height: 28,
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: IconButton.filled(
+              style: IconButton.styleFrom(
+                backgroundColor: Colors.orangeAccent.shade700,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  side: const BorderSide(color: Colors.black87, width: 1.5),
+                ),
+              ),
+              icon: const Icon(
+                Icons.settings,
+                color: Colors.white,
+              ),
+              tooltip: "Settings",
+              onPressed: _openSettings,
             ),
-            onPressed: _openSettings,
           ),
         ],
       ),
 
-      // Make the whole page scrollable to prevent overflow
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // ===== TOP TIMER AREA =====
-            Column(
-              children: [
-                Row(
-                  children: [
-                    Image.asset(catImage, width: 70),
-                    const SizedBox(width: 12),
-
-                    // TIMER PILL
-                    Expanded(
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 24, vertical: 16),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(50),
-                          border: Border.all(color: Colors.black, width: 3),
-                        ),
-                        child: Column(
-                          children: [
-                            const Text(
-                              "TIMER",
-                              style: TextStyle(
-                                letterSpacing: 4,
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.black87,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              _formattedTime,
-                              style: const TextStyle(
-                                fontSize: 36,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.black87,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-
-                    const SizedBox(width: 12),
-                    Image.asset(catImage, width: 70),
-                  ],
-                ),
-
-                const SizedBox(height: 24),
-
-                // CIRCLE BUTTONS
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    BauhausCircleButton(
-                      icon: Icons.refresh,
-                      label: "Reset",
-                      onPressed: _reset,
-                      color: Colors.redAccent,
-                    ),
-                    const SizedBox(width: 16),
-                    BauhausCircleButton(
-                      icon: Icons.play_arrow,
-                      label: "Start",
-                      onPressed:
-                          _timerStatus == TimerStatus.running ? null : _start,
-                      color: Colors.green.shade700,
-                    ),
-                    const SizedBox(width: 16),
-                    BauhausCircleButton(
-                      icon: Icons.pause,
-                      label: "Pause",
-                      onPressed:
-                          _timerStatus == TimerStatus.running ? _pause : null,
-                      color: Colors.orange.shade700,
-                    ),
-                  ],
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 16),
-            const Divider(thickness: 2),
-            const SizedBox(height: 8),
-
-            // ===== TASK AREA =====
-            const Text(
-              "Tasks",
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 20,
-                letterSpacing: 2,
-              ),
-            ),
-            const SizedBox(height: 12),
-
-            // ADD TASK ROW
-            Row(
-              children: [
-                InkWell(
-                  onTap: _addTask,
-                  child: Container(
-                    width: 40,
-                    height: 40,
-                    decoration: const BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: Colors.black,
-                    ),
-                    child: const Icon(Icons.add, color: Colors.white),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      border: Border.all(color: Colors.black, width: 2),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: TextField(
-                      controller: _taskController,
-                      style: const TextStyle(color: Colors.black87),
-                      decoration: const InputDecoration(
-                        hintText: "Type task here",
-                        hintStyle: TextStyle(color: Colors.black54),
-                        border: InputBorder.none,
-                      ),
-                      onSubmitted: (_) => _addTask(),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 12),
-
-            // TASK LIST
-            ListView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: _tasks.length,
-              itemBuilder: (context, index) {
-                final task = _tasks[index];
-
-                return Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
-                  child: Row(
+      body: Container(
+        decoration: _backgroundDecoration(),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                child: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: _contentOverlayColor != null
+                      ? BoxDecoration(
+                          color: _contentOverlayColor,
+                          borderRadius: BorderRadius.circular(12),
+                        )
+                      : null,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Checkbox(
-                        value: task.completed,
-                        onChanged: (v) {
-                          setState(() => task.completed = v ?? false);
-                        },
-                      ),
-                      Expanded(
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            border:
-                                Border.all(color: Colors.black, width: 2),
-                            borderRadius: BorderRadius.circular(4),
+                      // ===== TOP TIMER AREA =====
+                      Column(
+                        children: [
+                          Row(
+                            children: [
+                              Image.asset(catImage, width: 70),
+                              const SizedBox(width: 12),
+
+                              // TIMER PILL
+                              Expanded(
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 24, vertical: 16),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(50),
+                                    border: Border.all(color: Colors.black, width: 3),
+                                  ),
+                                  child: Column(
+                                    children: [
+                                      Text(
+                                        _sessionKind == SessionKind.work ? "WORK" : "BREAK",
+                                        style: const TextStyle(
+                                          letterSpacing: 4,
+                                          fontSize: 18,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.black87,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        _formattedTime,
+                                        style: const TextStyle(
+                                          fontSize: 36,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.black87,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+
+                              const SizedBox(width: 12),
+                              Container(
+                                width: 120,
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(color: Colors.black87, width: 2),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      _breakLabel,
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w700,
+                                        letterSpacing: 0.5,
+                                        color: Colors.black87,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      _breakTimerText,
+                                      style: const TextStyle(
+                                        fontSize: 20,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.black87,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
                           ),
-                          child: Text(
-                            task.title,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: Colors.black87,
-                              decoration: task.completed
-                                  ? TextDecoration.lineThrough
-                                  : TextDecoration.none,
+
+                          const SizedBox(height: 24),
+
+                          // CIRCLE BUTTONS
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              BauhausCircleButton(
+                                icon: Icons.refresh,
+                                label: "Reset",
+                                onPressed: _reset,
+                                color: Colors.redAccent,
+                              ),
+                              const SizedBox(width: 16),
+                              BauhausCircleButton(
+                                icon: _timerStatus == TimerStatus.running
+                                    ? Icons.pause
+                                    : Icons.play_arrow,
+                                label: _timerStatus == TimerStatus.running ? "Pause" : "Start",
+                                onPressed: _timerStatus == TimerStatus.running ? _pause : _start,
+                                color: _timerStatus == TimerStatus.running
+                                    ? Colors.orange.shade700
+                                    : Colors.green.shade700,
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+
+                      const SizedBox(height: 16),
+                      const Divider(thickness: 2),
+                      const SizedBox(height: 8),
+
+                      // ===== TASK AREA =====
+                      const Text(
+                        "Tasks",
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 20,
+                          letterSpacing: 2,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+
+                      // ADD TASK ROW
+                      Row(
+                        children: [
+                          InkWell(
+                            onTap: _addTask,
+                            child: Container(
+                              width: 40,
+                              height: 40,
+                              decoration: const BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: Colors.black,
+                              ),
+                              child: const Icon(Icons.add, color: Colors.white),
                             ),
                           ),
-                        ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                border: Border.all(color: Colors.black, width: 2),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: TextField(
+                                controller: _taskController,
+                                style: const TextStyle(color: Colors.black87),
+                                decoration: const InputDecoration(
+                                  hintText: "Type task here",
+                                  hintStyle: TextStyle(color: Colors.black54),
+                                  border: InputBorder.none,
+                                ),
+                                onSubmitted: (_) => _addTask(),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                      IconButton(
-                        icon: const Icon(
-                          Icons.remove_circle_outline_outlined,
-                        ),
-                        onPressed: () => _removeTask(index),
+
+                      const SizedBox(height: 12),
+
+                      // TASK LIST
+                      ListView.builder(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        itemCount: _tasks.length,
+                        itemBuilder: (context, index) {
+                          final task = _tasks[index];
+
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 4),
+                            child: Row(
+                              children: [
+                                Checkbox(
+                                  value: task.completed,
+                                  onChanged: (v) {
+                                    setState(() => task.completed = v ?? false);
+                                  },
+                                ),
+                                Expanded(
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      border:
+                                          Border.all(color: Colors.black, width: 2),
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Text(
+                                      task.title,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        color: Colors.black87,
+                                        decoration: task.completed
+                                            ? TextDecoration.lineThrough
+                                            : TextDecoration.none,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                IconButton(
+                                  icon: const Icon(
+                                    Icons.remove_circle_outline_outlined,
+                                  ),
+                                  onPressed: () => _removeTask(index),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
                       ),
                     ],
                   ),
-                );
-              },
-            ),
-          ],
+                ),
+              ),
+            );
+          },
         ),
       ),
     );
