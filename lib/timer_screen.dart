@@ -386,9 +386,16 @@ class _TimerScreenState extends State<TimerScreen> {
                       label: Text('$m min break'),
                       selected: selected,
                       onSelected: (_) {
-                        _setSession(
-                            m == 5 ? SessionKind.shortBreak : SessionKind.longBreak);
+                        // Update break length without forcing the current session
+                        // into a break when the user is working.
                         _selectBreak(m);
+                        if (_sessionKind != SessionKind.work) {
+                          setState(() {
+                            _sessionKind = m == 5
+                                ? SessionKind.shortBreak
+                                : SessionKind.longBreak;
+                          });
+                        }
                       },
                     );
                   }).toList(),
@@ -678,52 +685,69 @@ class _TimerScreenState extends State<TimerScreen> {
                       const SizedBox(height: 12),
 
                       // TASK LIST
-                      ListView.builder(
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        itemCount: _tasks.length,
-                        itemBuilder: (context, index) {
-                          final task = _tasks[index];
+                      Builder(
+                        builder: (context) {
+                          final orderedTasks = [
+                            ..._tasks.where((t) => !t.completed),
+                            ..._tasks.where((t) => t.completed),
+                          ];
 
-                          return Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 4),
-                            child: Row(
-                              children: [
-                                Checkbox(
-                                  value: task.completed,
-                                  onChanged: (v) {
-                                    setState(() => task.completed = v ?? false);
-                                  },
-                                ),
-                                Expanded(
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                                    decoration: BoxDecoration(
-                                      color: Colors.white,
-                                      border:
-                                          Border.all(color: Colors.black, width: 2),
-                                      borderRadius: BorderRadius.circular(4),
+                          return ListView.builder(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            itemCount: orderedTasks.length,
+                            itemBuilder: (context, index) {
+                              final task = orderedTasks[index];
+                              final sourceIndex = _tasks.indexOf(task);
+
+                              return Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 4),
+                                child: Row(
+                                  children: [
+                                    Checkbox(
+                                      value: task.completed,
+                                      onChanged: (v) {
+                                        setState(() {
+                                          task.completed = v ?? false;
+                                        });
+                                      },
                                     ),
-                                    child: Text(
-                                      task.title,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        color: Colors.black87,
-                                        decoration: task.completed
-                                            ? TextDecoration.lineThrough
-                                            : TextDecoration.none,
+                                    Expanded(
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                                        decoration: BoxDecoration(
+                                          color: task.completed
+                                              ? const Color(0xFFE6E4E4) // darker for completed items
+                                              : Colors.white,
+                                          border:
+                                              Border.all(color: Colors.black, width: 2),
+                                          borderRadius: BorderRadius.circular(4),
+                                        ),
+                                        child: Text(
+                                          task.title,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            color: Colors.black87,
+                                            decoration: task.completed
+                                                ? TextDecoration.lineThrough
+                                                : TextDecoration.none,
+                                            decorationColor: Colors.black87,
+                                            decorationStyle: TextDecorationStyle.solid,
+                                            decorationThickness: 2,
+                                          ),
+                                        ),
                                       ),
                                     ),
-                                  ),
+                                    IconButton(
+                                      icon: const Icon(
+                                        Icons.remove_circle_outline_outlined,
+                                      ),
+                                      onPressed: () => _removeTask(sourceIndex),
+                                    ),
+                                  ],
                                 ),
-                                IconButton(
-                                  icon: const Icon(
-                                    Icons.remove_circle_outline_outlined,
-                                  ),
-                                  onPressed: () => _removeTask(index),
-                                ),
-                              ],
-                            ),
+                              );
+                            },
                           );
                         },
                       ),
